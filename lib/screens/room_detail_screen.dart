@@ -1,494 +1,247 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import '../theme/app_theme.dart';
+import 'package:intl/intl.dart';
 import '../models/models.dart';
-import '../widgets/common_widgets.dart';
+import 'camera_record_screen.dart';
 
 class RoomDetailScreen extends StatefulWidget {
-  final RoomModel room;
+  final Room room;
+
   const RoomDetailScreen({super.key, required this.room});
 
   @override
   State<RoomDetailScreen> createState() => _RoomDetailScreenState();
 }
 
-class _RoomDetailScreenState extends State<RoomDetailScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _RoomDetailScreenState extends State<RoomDetailScreen> {
+  late Room _room;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _room = widget.room;
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+  void _navigateToCamera() async {
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CameraRecordScreen(roomId: _room.id),
+      ),
+    );
+
+    if (result != null && result is VideoClip) {
+      setState(() {
+        _room = Room(
+          id: _room.id,
+          name: _room.name,
+          linkCode: _room.linkCode,
+          password: _room.password,
+          createdAt: _room.createdAt,
+          memberIds: _room.memberIds,
+          clips: [..._room.clips, result],
+        );
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final room = widget.room;
-
     return Scaffold(
-      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        title: Text(_room.name),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.beige),
-            ),
-            child: const Icon(Icons.arrow_back_ios_new_rounded, size: 16),
-          ),
-        ),
-        title: Text(room.title, style: AppTextStyles.titleMedium),
         actions: [
-          GestureDetector(
-            onTap: () => _shareInviteCode(context, room.inviteCode),
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(0, 8, 16, 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: AppColors.accent,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.share_outlined, size: 15, color: AppColors.primaryDeep),
-                  SizedBox(width: 4),
-                  Text(
-                    '초대',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryDeep,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: _showRoomInfo,
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: AppColors.primary,
-          unselectedLabelColor: AppColors.textHint,
-          indicatorColor: AppColors.primary,
-          indicatorSize: TabBarIndicatorSize.label,
-          dividerColor: AppColors.divider,
-          labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          tabs: const [
-            Tab(text: '오늘 하루'),
-            Tab(text: '타임라인'),
-          ],
-        ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: _room.clips.isEmpty ? _buildEmptyState() : _buildClipGrid(),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _navigateToCamera,
+        icon: const Icon(Icons.videocam),
+        label: const Text('2초 촬영'),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _buildTodayView(room),
-          _buildTimelineView(room),
+          Icon(
+            Icons.video_call_outlined,
+            size: 80,
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            '아직 촬영된 클립이 없어요',
+            style: Theme.of(context).textTheme.displayMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '첫 번째 2초 영상을 촬영해보세요!',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
         ],
       ),
     );
   }
 
-  // ── 오늘 하루 탭: 분할 화면 브이로그
-  Widget _buildTodayView(RoomModel room) {
-    final clipsByUser = <String, List<ClipModel>>{};
-    for (final c in room.todayClips) {
-      clipsByUser.putIfAbsent(c.userId, () => []).add(c);
+  Widget _buildClipGrid() {
+    // 시간별로 그룹화
+    final clipsByHour = <String, List<VideoClip>>{};
+    for (final clip in _room.clips) {
+      final hourKey = DateFormat('HH:00').format(clip.recordedAt);
+      clipsByHour.putIfAbsent(hourKey, () => []).add(clip);
     }
-    final userIds = clipsByUser.keys.toList();
 
-    return SingleChildScrollView(
+    final sortedHours = clipsByHour.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    return ListView.builder(
       padding: const EdgeInsets.all(16),
+      itemCount: sortedHours.length,
+      itemBuilder: (context, index) {
+        final hour = sortedHours[index];
+        final clips = clipsByHour[hour]!;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                hour,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 0.75,
+              ),
+              itemCount: clips.length,
+              itemBuilder: (context, clipIndex) {
+                final clip = clips[clipIndex];
+                return _buildClipCard(clip);
+              },
+            ),
+            const SizedBox(height: 24),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildClipCard(VideoClip clip) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 상단 통계
-          _buildStats(room),
-          const SizedBox(height: 20),
-
-          // 분할 화면 뷰
-          if (userIds.length >= 2)
-            _buildSplitView(userIds, clipsByUser)
-          else
-            _buildSingleUserView(userIds, clipsByUser),
-
-          const SizedBox(height: 20),
-
-          // 가장 최근 순간들
-          const Text('💫 오늘의 순간들', style: AppTextStyles.titleMedium),
-          const SizedBox(height: 12),
-          _buildMomentGrid(room.todayClips),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStats(RoomModel room) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.beige),
-      ),
-      child: Row(
-        children: [
-          _buildStatItem('참여자', '${room.participantCount}명'),
-          _buildStatDivider(),
-          _buildStatItem('총 클립', '${room.todayClips.length}개'),
-          _buildStatDivider(),
-          _buildStatItem('달성률', '${(room.completionRate * 100).toInt()}%'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem(String label, String value) {
-    return Expanded(
-      child: Column(
-        children: [
-          Text(value, style: AppTextStyles.displayMedium.copyWith(
-            fontSize: 20, color: AppColors.primary,
-          )),
-          const SizedBox(height: 2),
-          Text(label, style: AppTextStyles.caption),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatDivider() {
-    return Container(width: 1, height: 32, color: AppColors.divider);
-  }
-
-  // ── 분할 화면 브이로그
-  Widget _buildSplitView(
-      List<String> userIds, Map<String, List<ClipModel>> clipsByUser) {
-    final displayCount = userIds.length.clamp(1, 4);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('📺 함께한 하루', style: AppTextStyles.titleMedium),
-        const SizedBox(height: 12),
-        AspectRatio(
-          aspectRatio: displayCount >= 3 ? 1.2 : 1.6,
-          child: displayCount <= 2
-              ? Row(
-                  children: List.generate(
-                    displayCount,
-                    (i) => Expanded(
-                      child: Container(
-                        margin: EdgeInsets.only(right: i == 0 ? 4 : 0),
-                        child: _buildUserPanel(
-                          userIds[i],
-                          clipsByUser[userIds[i]]!,
-                        ),
-                      ),
-                    ),
-                  ),
-                )
-              : GridView.count(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 4,
-                  crossAxisSpacing: 4,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: List.generate(
-                    displayCount,
-                    (i) => _buildUserPanel(
-                      userIds[i],
-                      clipsByUser[userIds[i]]!,
-                    ),
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(12),
+                ),
+              ),
+              child: Center(
+                child: Icon(
+                  Icons.play_circle_outline,
+                  size: 48,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  clip.userName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  DateFormat('HH:mm').format(clip.recordedAt),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRoomInfo() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(_room.name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildInfoRow('링크 코드', _room.linkCode),
+            const SizedBox(height: 8),
+            _buildInfoRow('비밀번호', _room.password),
+            const SizedBox(height: 8),
+            _buildInfoRow('참여 인원', '${_room.memberIds.length}명'),
+            const SizedBox(height: 8),
+            _buildInfoRow('클립 수', '${_room.clips.length}개'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Colors.grey),
+        ),
+        Text(
+          value,
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
       ],
-    );
-  }
-
-  Widget _buildUserPanel(String userId, List<ClipModel> clips) {
-    final latest = clips.last;
-    return Container(
-      decoration: BoxDecoration(
-        color: latest.avatarColor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: latest.avatarColor.withValues(alpha: 0.3)),
-      ),
-      child: Stack(
-        children: [
-          // 이모지 그리드 배경
-          Positioned.fill(
-            child: GridView.count(
-              crossAxisCount: 3,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(8),
-              mainAxisSpacing: 4,
-              crossAxisSpacing: 4,
-              children: clips.take(9).map((c) {
-                return Container(
-                  decoration: BoxDecoration(
-                    color: c.avatarColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Center(
-                    child: Text(c.emoji, style: const TextStyle(fontSize: 16)),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-          // 하단 사용자 정보
-          Positioned(
-            bottom: 0, left: 0, right: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    latest.avatarColor.withValues(alpha: 0.4),
-                  ],
-                ),
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(16),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Text(
-                    userId == 'me' ? '나' : latest.userNickname,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${clips.length}컷',
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // 현재 사용자 표시
-          if (userId == 'me')
-            Positioned(
-              top: 8, right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const Text(
-                  'ME',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSingleUserView(
-      List<String> userIds, Map<String, List<ClipModel>> clipsByUser) {
-    if (userIds.isEmpty) return const SizedBox.shrink();
-    final uid = userIds[0];
-    final clips = clipsByUser[uid]!;
-    return _buildUserPanel(uid, clips);
-  }
-
-  // ── 순간 그리드
-  Widget _buildMomentGrid(List<ClipModel> clips) {
-    final sorted = List<ClipModel>.from(clips)
-      ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
-    return GridView.builder(
-      physics: const NeverScrollableScrollPhysics(),
-      shrinkWrap: true,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: sorted.length,
-      itemBuilder: (context, index) {
-        final clip = sorted[index];
-        return Column(
-          children: [
-            ClipAvatar(color: clip.avatarColor, emoji: clip.emoji, size: 44),
-            const SizedBox(height: 4),
-            Text(clip.userNickname == '나' ? '나' : clip.userNickname,
-                style: AppTextStyles.caption, maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text('${clip.hour}시', style: AppTextStyles.caption.copyWith(
-              color: AppColors.primary, fontWeight: FontWeight.w600,
-            )),
-          ],
-        );
-      },
-    );
-  }
-
-  // ── 타임라인 탭
-  Widget _buildTimelineView(RoomModel room) {
-    final sorted = List<ClipModel>.from(room.todayClips)
-      ..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: sorted.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 0),
-      itemBuilder: (context, index) {
-        final clip = sorted[index];
-        final isFirst = index == 0;
-        final isLast = index == sorted.length - 1;
-
-        return IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 타임라인 선
-              SizedBox(
-                width: 40,
-                child: Column(
-                  children: [
-                    if (!isFirst)
-                      Container(width: 1.5, height: 12, color: AppColors.beige),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: clip.userId == 'me' ? AppColors.primary : AppColors.beigeDeep,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    if (!isLast)
-                      Expanded(child: Container(width: 1.5, color: AppColors.beige)),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.beige),
-                  ),
-                  child: Row(
-                    children: [
-                      ClipAvatar(color: clip.avatarColor, emoji: clip.emoji, size: 40),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              clip.userId == 'me' ? '나' : clip.userNickname,
-                              style: AppTextStyles.titleMedium.copyWith(fontSize: 14),
-                            ),
-                            Text(
-                              '${clip.hour}시의 순간',
-                              style: AppTextStyles.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text(
-                        '${clip.hour}:00',
-                        style: AppTextStyles.caption.copyWith(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _shareInviteCode(BuildContext context, String code) {
-    Clipboard.setData(ClipboardData(text: code));
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(28),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40, height: 4,
-              margin: const EdgeInsets.only(bottom: 24),
-              decoration: BoxDecoration(
-                color: AppColors.beige, borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Text('🔗', style: TextStyle(fontSize: 44)),
-            const SizedBox(height: 16),
-            const Text('초대 코드', style: AppTextStyles.titleLarge),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.cardBg,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Text(
-                code,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 4,
-                  color: AppColors.primaryDeep,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text('클립보드에 복사됐어요!', style: AppTextStyles.bodyMedium),
-            const SizedBox(height: 24),
-            RoundedButton(
-              label: '닫기',
-              onTap: () => Navigator.pop(context),
-              width: double.infinity,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

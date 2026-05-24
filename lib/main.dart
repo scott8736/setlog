@@ -11,11 +11,11 @@ void main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
-  runApp(const VlogDateApp());
+  runApp(const SetlogApp());
 }
 
-class VlogDateApp extends StatelessWidget {
-  const VlogDateApp({super.key});
+class SetlogApp extends StatelessWidget {
+  const SetlogApp({super.key});
 
   @override
   Widget build(BuildContext context) {
