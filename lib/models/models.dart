@@ -1,11 +1,13 @@
+import 'dart:math';
 import 'package:uuid/uuid.dart';
 
 // 방 (Room) 모델
 class Room {
   final String id;
   final String name;
-  final String linkCode; // 공유용 링크 코드
-  final String password; // 4자리 비밀번호
+  final String linkCode;   // 공유용 링크 코드 (딥링크에 포함)
+  final String password;   // 4자리 비밀번호
+  final String creatorId;  // 방장 ID
   final DateTime createdAt;
   final List<String> memberIds;
   final List<VideoClip> clips;
@@ -15,10 +17,32 @@ class Room {
     required this.name,
     required this.linkCode,
     required this.password,
+    required this.creatorId,
     required this.createdAt,
     required this.memberIds,
     required this.clips,
   });
+
+  bool get isOwner => true; // 내가 속한 방만 보임
+
+  // 오늘 클립만 필터
+  List<VideoClip> get todayClips {
+    final today = DateTime.now();
+    return clips.where((c) =>
+      c.recordedAt.year == today.year &&
+      c.recordedAt.month == today.month &&
+      c.recordedAt.day == today.day
+    ).toList();
+  }
+
+  // 당일 클립을 시간별로 그룹화
+  Map<int, List<VideoClip>> get clipsByHour {
+    final map = <int, List<VideoClip>>{};
+    for (final clip in todayClips) {
+      map.putIfAbsent(clip.recordedAt.hour, () => []).add(clip);
+    }
+    return map;
+  }
 
   factory Room.create(String name, String creatorId) {
     const uuid = Uuid();
@@ -27,22 +51,24 @@ class Room {
       name: name,
       linkCode: _generateLinkCode(),
       password: _generatePassword(),
+      creatorId: creatorId,
       createdAt: DateTime.now(),
       memberIds: [creatorId],
       clips: [],
     );
   }
 
+  // 8자리 대문자+숫자 랜덤 코드
   static String _generateLinkCode() {
-    // 8자리 랜덤 코드 (예: ABC12345)
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return List.generate(8, (index) => chars[(DateTime.now().microsecond + index) % chars.length]).join();
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final rng = Random.secure();
+    return List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
   }
 
+  // 4자리 숫자 비밀번호
   static String _generatePassword() {
-    // 4자리 숫자 비밀번호
-    final random = DateTime.now().millisecondsSinceEpoch % 10000;
-    return random.toString().padLeft(4, '0');
+    final rng = Random.secure();
+    return (1000 + rng.nextInt(9000)).toString();
   }
 
   Map<String, dynamic> toJson() => {
@@ -50,6 +76,7 @@ class Room {
     'name': name,
     'linkCode': linkCode,
     'password': password,
+    'creatorId': creatorId,
     'createdAt': createdAt.toIso8601String(),
     'memberIds': memberIds,
     'clips': clips.map((c) => c.toJson()).toList(),
@@ -60,21 +87,33 @@ class Room {
     name: json['name'],
     linkCode: json['linkCode'],
     password: json['password'],
+    creatorId: json['creatorId'] ?? '',
     createdAt: DateTime.parse(json['createdAt']),
     memberIds: List<String>.from(json['memberIds']),
     clips: (json['clips'] as List).map((c) => VideoClip.fromJson(c)).toList(),
   );
+
+  Room copyWith({List<VideoClip>? clips, List<String>? memberIds}) => Room(
+    id: id,
+    name: name,
+    linkCode: linkCode,
+    password: password,
+    creatorId: creatorId,
+    createdAt: createdAt,
+    memberIds: memberIds ?? this.memberIds,
+    clips: clips ?? this.clips,
+  );
 }
 
-// 2초 영상 클립 모델
+// 2~4초 영상 클립 모델
 class VideoClip {
   final String id;
   final String roomId;
   final String userId;
   final String userName;
   final DateTime recordedAt;
-  final String? videoUrl; // 실제 앱에서는 영상 URL
-  final String thumbnailUrl;
+  final String? videoPath;   // 로컬 저장 경로
+  final String? memo;        // 짧은 텍스트 메모
 
   VideoClip({
     required this.id,
@@ -82,8 +121,8 @@ class VideoClip {
     required this.userId,
     required this.userName,
     required this.recordedAt,
-    this.videoUrl,
-    required this.thumbnailUrl,
+    this.videoPath,
+    this.memo,
   });
 
   Map<String, dynamic> toJson() => {
@@ -92,8 +131,8 @@ class VideoClip {
     'userId': userId,
     'userName': userName,
     'recordedAt': recordedAt.toIso8601String(),
-    'videoUrl': videoUrl,
-    'thumbnailUrl': thumbnailUrl,
+    'videoPath': videoPath,
+    'memo': memo,
   };
 
   factory VideoClip.fromJson(Map<String, dynamic> json) => VideoClip(
@@ -102,8 +141,8 @@ class VideoClip {
     userId: json['userId'],
     userName: json['userName'],
     recordedAt: DateTime.parse(json['recordedAt']),
-    videoUrl: json['videoUrl'],
-    thumbnailUrl: json['thumbnailUrl'],
+    videoPath: json['videoPath'],
+    memo: json['memo'],
   );
 }
 
@@ -112,18 +151,10 @@ class AppUser {
   final String id;
   final String nickname;
 
-  AppUser({
-    required this.id,
-    required this.nickname,
-  });
+  AppUser({required this.id, required this.nickname});
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'nickname': nickname,
-  };
+  Map<String, dynamic> toJson() => {'id': id, 'nickname': nickname};
 
-  factory AppUser.fromJson(Map<String, dynamic> json) => AppUser(
-    id: json['id'],
-    nickname: json['nickname'],
-  );
+  factory AppUser.fromJson(Map<String, dynamic> json) =>
+      AppUser(id: json['id'], nickname: json['nickname']);
 }

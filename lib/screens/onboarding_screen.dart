@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../services/storage_service.dart';
+import '../theme/app_theme.dart';
 import 'home_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -12,93 +13,88 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  final _nicknameController = TextEditingController();
-  final _storageService = StorageService();
-  bool _isLoading = true;
+  final _controller = TextEditingController();
+  final _storage = StorageService();
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _checkExistingUser();
+    _checkUser();
   }
 
-  Future<void> _checkExistingUser() async {
-    final user = await _storageService.getUser();
+  Future<void> _checkUser() async {
+    // 당일 아닌 클립 자동 삭제
+    await _storage.deleteOldClips();
+    final user = await _storage.getUser();
     if (user != null && mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
+      Navigator.pushReplacement(context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()));
     } else {
-      setState(() => _isLoading = false);
+      setState(() => _loading = false);
     }
   }
 
-  Future<void> _saveNickname() async {
-    if (_nicknameController.text.trim().isEmpty) {
+  Future<void> _start() async {
+    final nick = _controller.text.trim();
+    if (nick.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('닉네임을 입력해주세요')),
-      );
+          const SnackBar(content: Text('닉네임을 입력해주세요')));
       return;
     }
-
     const uuid = Uuid();
-    final user = AppUser(
-      id: uuid.v4(),
-      nickname: _nicknameController.text.trim(),
-    );
-
-    await _storageService.saveUser(user);
-
+    await _storage.saveUser(AppUser(id: uuid.v4(), nickname: nick));
     if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
+      Navigator.pushReplacement(context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
+    if (_loading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 32),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Spacer(),
-              Text(
-                'SETLOG',
-                style: Theme.of(context).textTheme.displayLarge,
-                textAlign: TextAlign.center,
+              const Spacer(flex: 2),
+              // 로고
+              Container(
+                width: 80, height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.accentPink.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: const Icon(Icons.video_camera_back_outlined,
+                    size: 40, color: AppTheme.accentPink),
               ),
+              const SizedBox(height: 32),
+              const Text('SETLOG LOVABLE',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold,
+                      color: AppTheme.textDark, letterSpacing: 1)),
               const SizedBox(height: 8),
-              Text(
-                '매시간 2초, 하루를 기록하다',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
+              const Text('매시간 2초, 오늘 하루를 함께 기록해요',
+                  style: TextStyle(fontSize: 15, color: AppTheme.textLight)),
               const SizedBox(height: 60),
               TextField(
-                controller: _nicknameController,
-                decoration: const InputDecoration(
-                  labelText: '닉네임',
-                  hintText: '사용할 닉네임을 입력하세요',
-                ),
+                controller: _controller,
                 textAlign: TextAlign.center,
+                decoration: const InputDecoration(
+                  hintText: '닉네임을 입력하세요',
+                ),
+                onSubmitted: (_) => _start(),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               ElevatedButton(
-                onPressed: _saveNickname,
+                onPressed: _start,
                 child: const Text('시작하기'),
               ),
-              const Spacer(),
+              const Spacer(flex: 3),
             ],
           ),
         ),
@@ -108,7 +104,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   void dispose() {
-    _nicknameController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 }
